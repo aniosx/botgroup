@@ -60,3 +60,4 @@ if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.create_task(start_bot())
     app.run(host='0.0.0.0', port=8080)
+print("Bot is polling for updates... (waiting for messages)")
