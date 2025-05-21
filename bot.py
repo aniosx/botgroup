@@ -59,14 +59,12 @@ def webhook():
     dispatcher.process_update(update)
     return 'ok'
 
-# Initialisation du webhook
-@app.before_first_request
-def init_webhook():
+# Lancement du serveur Flask
+if __name__ == '__main__':
+    # Initialisation du webhook ici
     webhook_url = f"{WEBHOOK_URL}/webhook"
     bot.delete_webhook()
     bot.set_webhook(url=webhook_url)
     logger.info(f"Webhook défini sur : {webhook_url}")
 
-# Démarrage de Flask
-if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)
