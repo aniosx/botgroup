@@ -59,11 +59,6 @@ def handle_owner_message(update: Update, context: CallbackContext):
     user = update.effective_user
     text = update.message.text
 
-    if user.id != OWNER_ID:
-        update.message.reply_text("هذا البوت خاص.")
-        logger.warning(f"Unauthorized user tried to send: {user.id}")
-        return
-
     if text:
         context.bot.send_message(chat_id=GROUP_CHAT_ID, text=text)
         update.message.reply_text("تم إرسال الرسالة إلى المجموعة.")
@@ -71,7 +66,7 @@ def handle_owner_message(update: Update, context: CallbackContext):
 def handle_user_message(update: Update, context: CallbackContext):
     user = update.effective_user
     if user.id == OWNER_ID:
-        return  # Admin messages handled elsewhere
+        return  # المشرف يتم التعامل مع رسائله في handler منفصل
 
     if user.id in blocked_users:
         return
@@ -140,20 +135,29 @@ def main():
     updater = Updater(TOKEN)
     dispatcher = updater.dispatcher
 
-    # أوامر المسؤول
+    # أوامر المشرف
     dispatcher.add_handler(CommandHandler("reply", reply_command))
     dispatcher.add_handler(CommandHandler("block", block_command))
     dispatcher.add_handler(CommandHandler("unblock", unblock_command))
 
-    # رسائل النصية الخاصة
-    dispatcher.add_handler(MessageHandler(Filters.text & Filters.private, handle_owner_message))
-    dispatcher.add_handler(MessageHandler(Filters.text & Filters.private, handle_user_message))
+    # handler مخصص للمشرف فقط
+    dispatcher.add_handler(MessageHandler(
+        Filters.text & Filters.private & Filters.user(user_id=OWNER_ID),
+        handle_owner_message
+    ))
 
-    # تشغيل Flask
+    # handler لبقية المستخدمين
+    dispatcher.add_handler(MessageHandler(
+        Filters.text & Filters.private,
+        handle_user_message
+    ))
+
+    # تشغيل Flask في خلفية
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
 
+    # بدء البوت
     updater.start_polling()
     logger.info("Bot started.")
     updater.idle()
