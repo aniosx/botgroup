@@ -1,0 +1,1 @@
+touch blocked_users.txt
