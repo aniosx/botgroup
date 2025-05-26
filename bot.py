@@ -4,6 +4,7 @@
 import os
 import logging
 import threading
+import time
 
 from flask import Flask, request
 from dotenv import load_dotenv
@@ -31,8 +32,9 @@ load_dotenv()
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 OWNER_ID = int(os.getenv('OWNER_ID'))
 GROUP_CHAT_ID = int(os.getenv('GROUP_CHAT_ID'))
-PORT = int(os.environ.get('PORT', 8080))
+PORT = int(os.environ.get('PORT', 10000))  # منفذ افتراضي لـ Render
 APP_URL = os.getenv('APP_URL')  # مثال: https://your-app-name.onrender.com
+USE_WEBHOOK = os.getenv('USE_WEBHOOK', 'true').lower() == 'true'  # افتراضي: Webhook
 
 # إعداد Flask
 app = Flask(__name__)
@@ -44,9 +46,11 @@ def index():
 # مسار Webhook لاستقبال التحديثات من Telegram
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), updater.bot)
-    dispatcher.process_update(update)
-    return 'OK'
+    if USE_WEBHOOK:
+        update = Update.de_json(request.get_json(force=True), updater.bot)
+        dispatcher.process_update(update)
+        return 'OK'
+    return 'Webhook not enabled.', 403
 
 # مسار المستخدمين المحظورين
 BLOCKED_USERS_FILE = 'blocked_users.txt'
@@ -107,7 +111,7 @@ def handle_user_message(update: Update, context: CallbackContext):
     caption = message.caption or ''
     user_info = f"رسالة من المستخدم #{user.id}:\n{caption}"
 
-    # إرسال إلى المجموعة بدلاً من المشرف
+    # إرسال إلى المجموعة
     if message.text:
         context.bot.send_message(chat_id=GROUP_CHAT_ID, text=user_info + f"\n{message.text}")
     elif message.photo:
@@ -213,18 +217,33 @@ def main():
         handle_user_message
     ))
 
-    # إيقاف أي Webhook سابق
-    updater.bot.delete_webhook()
-
-    # إعداد Webhook
-    updater.bot.set_webhook(f'{APP_URL}/{TOKEN}')
-
-    # تشغيل Flask في الخلفية
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-
-    logger.info("Bot started with webhook.")
+    if USE_WEBHOOK:
+        # إيقاف أي Webhook سابق
+        updater.bot.delete_webhook()
+        # إعداد Webhook مع محاولات إعادة
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                updater.bot.set_webhook(f'{APP_URL}/{TOKEN}')
+                logger.info(f"Webhook set successfully: {APP_URL}/{TOKEN}")
+                break
+            except Exception as e:
+                logger.error(f"Failed to set webhook (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(5)  # الانتظار 5 ثوانٍ قبل المحاولة التالية
+                else:
+                    logger.error("Failed to set webhook after all retries.")
+                    raise
+        # تشغيل Flask في الخلفية
+        flask_thread = threading.Thread(target=run_flask)
+        flask_thread.daemon = True
+        flask_thread.start()
+        logger.info("Bot started with webhook.")
+    else:
+        # استخدام Polling
+        updater.start_polling()
+        logger.info("Bot started with polling.")
+        updater.idle()
 
 if __name__ == '__main__':
     main()
