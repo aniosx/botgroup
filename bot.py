@@ -5,7 +5,7 @@ import os
 import logging
 import threading
 
-from flask import Flask
+from flask import Flask, request
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
@@ -13,7 +13,8 @@ from telegram.ext import (
     MessageHandler,
     Filters,
     CallbackContext,
-    CommandHandler
+    CommandHandler,
+    Dispatcher
 )
 
 # إعداد السجلات
@@ -31,6 +32,7 @@ TOKEN = os.getenv('TELEGRAM_TOKEN')
 OWNER_ID = int(os.getenv('OWNER_ID'))
 GROUP_CHAT_ID = int(os.getenv('GROUP_CHAT_ID'))
 PORT = int(os.environ.get('PORT', 8080))
+APP_URL = os.getenv('APP_URL')  # مثال: https://your-app-name.onrender.com
 
 # إعداد Flask
 app = Flask(__name__)
@@ -38,6 +40,13 @@ app = Flask(__name__)
 @app.route('/')
 def index():
     return 'Bot is active.'
+
+# مسار Webhook لاستقبال التحديثات من Telegram
+@app.route(f'/{TOKEN}', methods=['POST'])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), updater.bot)
+    dispatcher.process_update(update)
+    return 'OK'
 
 # مسار المستخدمين المحظورين
 BLOCKED_USERS_FILE = 'blocked_users.txt'
@@ -60,7 +69,7 @@ def start_command(update: Update, context: CallbackContext):
     user = update.effective_user
     if user.id == OWNER_ID:
         return
-    update.message.reply_text("مرحبًا بك! أرسل رسالتك أو أي نوع من الوسائط، وسأقوم بإرسالها إلى المشرف.")
+    update.message.reply_text("مرحبًا بك! أرسل رسالتك أو أي نوع من الوسائط، وسأقوم بإرسالها إلى المجموعة.")
 
 # رسائل المشرف
 def handle_owner_message(update: Update, context: CallbackContext):
@@ -98,28 +107,28 @@ def handle_user_message(update: Update, context: CallbackContext):
     caption = message.caption or ''
     user_info = f"رسالة من المستخدم #{user.id}:\n{caption}"
 
-    # إرسال للمشرف
+    # إرسال إلى المجموعة بدلاً من المشرف
     if message.text:
-        context.bot.send_message(chat_id=OWNER_ID, text=user_info + f"\n{message.text}")
+        context.bot.send_message(chat_id=GROUP_CHAT_ID, text=user_info + f"\n{message.text}")
     elif message.photo:
-        context.bot.send_photo(chat_id=OWNER_ID, photo=message.photo[-1].file_id, caption=user_info)
+        context.bot.send_photo(chat_id=GROUP_CHAT_ID, photo=message.photo[-1].file_id, caption=user_info)
     elif message.video:
-        context.bot.send_video(chat_id=OWNER_ID, video=message.video.file_id, caption=user_info)
+        context.bot.send_video(chat_id=GROUP_CHAT_ID, video=message.video.file_id, caption=user_info)
     elif message.document:
-        context.bot.send_document(chat_id=OWNER_ID, document=message.document.file_id, caption=user_info)
+        context.bot.send_document(chat_id=GROUP_CHAT_ID, document=message.document.file_id, caption=user_info)
     elif message.audio:
-        context.bot.send_audio(chat_id=OWNER_ID, audio=message.audio.file_id, caption=user_info)
+        context.bot.send_audio(chat_id=GROUP_CHAT_ID, audio=message.audio.file_id, caption=user_info)
     elif message.voice:
-        context.bot.send_voice(chat_id=OWNER_ID, voice=message.voice.file_id, caption=user_info)
+        context.bot.send_voice(chat_id=GROUP_CHAT_ID, voice=message.voice.file_id, caption=user_info)
     elif message.sticker:
-        context.bot.send_sticker(chat_id=OWNER_ID, sticker=message.sticker.file_id)
-        context.bot.send_message(chat_id=OWNER_ID, text=user_info)
+        context.bot.send_sticker(chat_id=GROUP_CHAT_ID, sticker=message.sticker.file_id)
+        context.bot.send_message(chat_id=GROUP_CHAT_ID, text=user_info)
     else:
         update.message.reply_text("نوع الوسائط غير مدعوم.")
         return
 
     # تأكيد للمستخدم
-    update.message.reply_text("✅ تم إرسال رسالتك/الوسائط إلى المشرف. شكرًا لتواصلك.")
+    update.message.reply_text("✅ تم إرسال رسالتك/الوسائط إلى المجموعة. شكرًا لتواصلك.")
 
 # رد المشرف على مستخدم
 def reply_command(update: Update, context: CallbackContext):
@@ -180,7 +189,8 @@ def run_flask():
     app.run(host='0.0.0.0', port=PORT)
 
 def main():
-    updater = Updater(TOKEN)
+    global updater, dispatcher
+    updater = Updater(TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
     # أوامر المشرف
@@ -203,15 +213,18 @@ def main():
         handle_user_message
     ))
 
+    # إيقاف أي Webhook سابق
+    updater.bot.delete_webhook()
+
+    # إعداد Webhook
+    updater.bot.set_webhook(f'{APP_URL}/{TOKEN}')
+
     # تشغيل Flask في الخلفية
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
 
-    # بدء البوت
-    updater.start_polling()
-    logger.info("Bot started.")
-    updater.idle()
+    logger.info("Bot started with webhook.")
 
 if __name__ == '__main__':
     main()
