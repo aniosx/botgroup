@@ -241,6 +241,7 @@ def main():
         logger.info("Bot started with webhook.")
     else:
         # استخدام Polling
+        updater.bot.delete_webhook()  # إيقاف أي Webhook سابق
         updater.start_polling()
         logger.info("Bot started with polling.")
         updater.idle()
