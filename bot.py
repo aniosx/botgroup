@@ -60,32 +60,66 @@ def start_command(update: Update, context: CallbackContext):
     user = update.effective_user
     if user.id == OWNER_ID:
         return
-    update.message.reply_text("مرحبًا بك! أرسل رسالتك هنا، وسأقوم بإرسالها إلى المشرف.")
+    update.message.reply_text("مرحبًا بك! أرسل رسالتك أو أي نوع من الوسائط، وسأقوم بإرسالها إلى المشرف.")
 
 # رسائل المشرف
 def handle_owner_message(update: Update, context: CallbackContext):
-    text = update.message.text
-    if text:
-        context.bot.send_message(chat_id=GROUP_CHAT_ID, text=text)
-        update.message.reply_text("تم إرسال الرسالة إلى المجموعة.")
+    message = update.message
+    chat_id = GROUP_CHAT_ID
+
+    if message.text:
+        context.bot.send_message(chat_id=chat_id, text=message.text)
+    elif message.photo:
+        context.bot.send_photo(chat_id=chat_id, photo=message.photo[-1].file_id, caption=message.caption or '')
+    elif message.video:
+        context.bot.send_video(chat_id=chat_id, video=message.video.file_id, caption=message.caption or '')
+    elif message.document:
+        context.bot.send_document(chat_id=chat_id, document=message.document.file_id, caption=message.caption or '')
+    elif message.audio:
+        context.bot.send_audio(chat_id=chat_id, audio=message.audio.file_id, caption=message.caption or '')
+    elif message.voice:
+        context.bot.send_voice(chat_id=chat_id, voice=message.voice.file_id, caption=message.caption or '')
+    elif message.sticker:
+        context.bot.send_sticker(chat_id=chat_id, sticker=message.sticker.file_id)
+    else:
+        update.message.reply_text("نوع الوسائط غير مدعوم.")
+        return
+
+    update.message.reply_text("تم إرسال الرسالة/الوسائط إلى المجموعة.")
 
 # رسائل المستخدمين العاديين
 def handle_user_message(update: Update, context: CallbackContext):
     user = update.effective_user
+    message = update.message
 
     if user.id == OWNER_ID or user.id in blocked_users:
         return
 
-    msg = update.message.text or ''
+    caption = message.caption or ''
+    user_info = f"رسالة من المستخدم #{user.id}:\n{caption}"
 
     # إرسال للمشرف
-    context.bot.send_message(
-        chat_id=OWNER_ID,
-        text=f"رسالة من المستخدم #{user.id}:\n{msg}"
-    )
+    if message.text:
+        context.bot.send_message(chat_id=OWNER_ID, text=user_info + f"\n{message.text}")
+    elif message.photo:
+        context.bot.send_photo(chat_id=OWNER_ID, photo=message.photo[-1].file_id, caption=user_info)
+    elif message.video:
+        context.bot.send_video(chat_id=OWNER_ID, video=message.video.file_id, caption=user_info)
+    elif message.document:
+        context.bot.send_document(chat_id=OWNER_ID, document=message.document.file_id, caption=user_info)
+    elif message.audio:
+        context.bot.send_audio(chat_id=OWNER_ID, audio=message.audio.file_id, caption=user_info)
+    elif message.voice:
+        context.bot.send_voice(chat_id=OWNER_ID, voice=message.voice.file_id, caption=user_info)
+    elif message.sticker:
+        context.bot.send_sticker(chat_id=OWNER_ID, sticker=message.sticker.file_id)
+        context.bot.send_message(chat_id=OWNER_ID, text=user_info)
+    else:
+        update.message.reply_text("نوع الوسائط غير مدعوم.")
+        return
 
     # تأكيد للمستخدم
-    update.message.reply_text("✅ تم إرسال رسالتك إلى المشرف. شكرًا لتواصلك.")
+    update.message.reply_text("✅ تم إرسال رسالتك/الوسائط إلى المشرف. شكرًا لتواصلك.")
 
 # رد المشرف على مستخدم
 def reply_command(update: Update, context: CallbackContext):
@@ -157,13 +191,15 @@ def main():
 
     # رسائل المشرف
     dispatcher.add_handler(MessageHandler(
-        Filters.text & Filters.private & Filters.user(user_id=OWNER_ID),
+        (Filters.text | Filters.photo | Filters.video | Filters.document | Filters.audio | Filters.voice | Filters.sticker) 
+        & Filters.private & Filters.user(user_id=OWNER_ID),
         handle_owner_message
     ))
 
     # رسائل المستخدمين
     dispatcher.add_handler(MessageHandler(
-        Filters.text & Filters.private,
+        (Filters.text | Filters.photo | Filters.video | Filters.document | Filters.audio | Filters.voice | Filters.sticker) 
+        & Filters.private,
         handle_user_message
     ))
 
