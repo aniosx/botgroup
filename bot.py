@@ -21,7 +21,11 @@ from telegram.ext import (
 # إعداد السجلات
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    handlers=[
+        logging.FileHandler('bot.log'),  # Save logs to a file for debugging
+        logging.StreamHandler()  # Also print logs to console
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -116,27 +120,31 @@ def handle_user_message(update: Update, context: CallbackContext):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     # إرسال للمشرف
-    if message.text:
-        context.bot.send_message(chat_id=OWNER_ID, text=user_info, reply_markup=reply_markup, parse_mode='Markdown')
-    elif message.photo:
-        context.bot.send_photo(chat_id=OWNER_ID, photo=message.photo[-1].file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
-    elif message.video:
-        context.bot.send_video(chat_id=OWNER_ID, video=message.video.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
-    elif message.document:
-        context.bot.send_document(chat_id=OWNER_ID, document=message.document.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
-    elif message.audio:
-        context.bot.send_audio(chat_id=OWNER_ID, audio=message.audio.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
-    elif message.voice:
-        context.bot.send_voice(chat_id=OWNER_ID, voice=message.voice.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
-    elif message.sticker:
-        context.bot.send_sticker(chat_id=OWNER_ID, sticker=message.sticker.file_id)
-        context.bot.send_message(chat_id=OWNER_ID, text=user_info, reply_markup=reply_markup, parse_mode='Markdown')
-    else:
-        update.message.reply_text("نوع الوسائط غير مدعوم.")
-        return
+    try:
+        if message.text:
+            context.bot.send_message(chat_id=OWNER_ID, text=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+        elif message.photo:
+            context.bot.send_photo(chat_id=OWNER_ID, photo=message.photo[-1].file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+        elif message.video:
+            context.bot.send_video(chat_id=OWNER_ID, video=message.video.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+        elif message.document:
+            context.bot.send_document(chat_id=OWNER_ID, document=message.document.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+        elif message.audio:
+            context.bot.send_audio(chat_id=OWNER_ID, audio=message.audio.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+        elif message.voice:
+            context.bot.send_voice(chat_id=OWNER_ID, voice=message.voice.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+        elif message.sticker:
+            context.bot.send_sticker(chat_id=OWNER_ID, sticker=message.sticker.file_id)
+            context.bot.send_message(chat_id=OWNER_ID, text=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+        else:
+            update.message.reply_text("نوع الوسائط غير مدعوم.")
+            return
 
-    # تأكيد للمستخدم
-    update.message.reply_text("✅ تم إرسال رسالتك/الوسائط إلى المشرف. شكرًا لتواصلك.")
+        # تأكيد للمستخدم
+        update.message.reply_text("✅ تم إرسال رسالتك/الوسائط إلى المشرف. شكرًا لتواصلك.")
+    except Exception as e:
+        logger.error(f"Error sending message to admin: {e}")
+        update.message.reply_text("حدث خطأ أثناء إرسال الرسالة إلى المشرف.")
 
 # معالجة الأزرار
 def button_callback(update: Update, context: CallbackContext):
@@ -176,6 +184,7 @@ def handle_reply(update: Update, context: CallbackContext):
         context.bot.send_message(chat_id=target_user_id, text=message)
         update.message.reply_text("تم إرسال الرد.")
     except Exception as e:
+        logger.error(f"Error sending reply to user {target_user_id}: {e}")
         update.message.reply_text(f"حدث خطأ: {e}")
     
     # تنظيف البيانات
@@ -204,6 +213,7 @@ def reply_command(update: Update, context: CallbackContext):
         context.bot.send_message(chat_id=user_id, text=message)
         update.message.reply_text("تم إرسال الرد.")
     except Exception as e:
+        logger.error(f"Error in reply_command: {e}")
         update.message.reply_text(f"حدث خطأ: {e}")
 
 # حظر مستخدم
@@ -222,6 +232,7 @@ def block_command(update: Update, context: CallbackContext):
         save_blocked_users(blocked_users)
         update.message.reply_text("تم الحظر.")
     except Exception as e:
+        logger.error(f"Error in block_command: {e}")
         update.message.reply_text(f"حدث خطأ: {e}")
 
 # إلغاء الحظر
@@ -240,6 +251,7 @@ def unblock_command(update: Update, context: CallbackContext):
         save_blocked_users(blocked_users)
         update.message.reply_text("تم إلغاء الحظر.")
     except Exception as e:
+        logger.error(f"Error in unblock_command: {e}")
         update.message.reply_text(f"حدث خطأ: {e}")
 
 # تشغيل Flask
@@ -247,7 +259,7 @@ def run_flask():
     app.run(host='0.0.0.0', port=PORT)
 
 def main():
-    updater = Updater(TOKEN)
+    updater = Updater(TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
     # إعداد ConversationHandler للرد
@@ -287,9 +299,13 @@ def main():
     flask_thread.start()
 
     # بدء البوت
-    updater.start_polling()
-    logger.info("Bot started.")
-    updater.idle()
+    try:
+        updater.start_polling()
+        logger.info("Bot started successfully.")
+        updater.idle()
+    except Exception as e:
+        logger.error(f"Error starting bot: {e}")
+        raise
 
 if __name__ == '__main__':
     main()
