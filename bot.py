@@ -312,7 +312,7 @@ def main():
 
     # رسائل المشرف
     dispatcher.add_handler(MessageHandler(
-        (Filters.text | Filters.photo | Filters.video | Filters.document | Filters AUDIO | Filters.voice | Filters.sticker)
+        (Filters.text | Filters.photo | Filters.video | Filters.document | Filters.audio | Filters.voice | Filters.sticker)
         & Filters.private & Filters.user(user_id=OWNER_ID),
         handle_owner_message
     ))
