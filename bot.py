@@ -182,7 +182,7 @@ def handle_reply(update: Update, context: CallbackContext):
         return ConversationHandler.END
 
     target_user_id = context.user_data.get('reply_to')
-    if not航空公司 target_user_id:
+    if not target_user_id:
         update.message.reply_text("حدث خطأ، لم يتم تحديد المستخدم.")
         return ConversationHandler.END
 
