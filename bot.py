@@ -3,18 +3,17 @@
 
 import os
 import logging
-import threading
-from flask import Flask, request
+from flask import Flask
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Updater,
+    Application,
     MessageHandler,
     Filters,
-    CallbackContext,
     CommandHandler,
     CallbackQueryHandler,
-    ConversationHandler
+    ConversationHandler,
+    ContextTypes,
 )
 
 # إعداد السجلات
@@ -36,29 +35,13 @@ TOKEN = os.getenv('TELEGRAM_TOKEN')
 OWNER_ID = int(os.getenv('OWNER_ID'))
 GROUP_CHAT_ID = int(os.getenv('GROUP_CHAT_ID'))
 PORT = int(os.environ.get('PORT', 8080))
-WEBHOOK_MODE = os.getenv('WEBHOOK_MODE', 'False').lower() == 'true'
 
-# إعداد Flask
+# إعداد Flask لفتح port كما يتطلب Render
 app = Flask(__name__)
 
 @app.route('/')
 def index():
     return 'Bot is active.'
-
-# Webhook endpoint
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        update = Update.de_json(request.get_json(force=True), updater.bot)
-        if update:
-            dispatcher.process_update(update)
-            return 'OK'
-        else:
-            logger.error("Received invalid update")
-            return 'Invalid update', 400
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return 'Error', 500
 
 # مسار المستخدمين المحظورين
 BLOCKED_USERS_FILE = 'blocked_users.txt'
@@ -80,15 +63,14 @@ blocked_users = load_blocked_users()
 REPLY = 1
 
 # رسالة ترحيب عند /start
-def start_command(update: Update, context: CallbackContext):
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user.id == OWNER_ID:
         return
-    update.message.reply_text("مرحبًا بك! أرسل رسالتك أو أي نوع من الوسائط، وسأقوم بإرسالها إلى المشرف.")
+    await update.message.reply_text("مرحبًا بك! أرسل رسالتك أو أي نوع من الوسائط، وسأقوم بإرسالها إلى المشرف.")
 
 # رسائل المشرف
-def handle_owner_message(update: Update, context: CallbackContext):
-    # Skip if the admin is in the REPLY state
+async def handle_owner_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('reply_to'):
         return
 
@@ -97,42 +79,40 @@ def handle_owner_message(update: Update, context: CallbackContext):
 
     try:
         if message.text:
-            context.bot.send_message(chat_id=chat_id, text=message.text)
+            await context.bot.send_message(chat_id=chat_id, text=message.text)
         elif message.photo:
-            context.bot.send_photo(chat_id=chat_id, photo=message.photo[-1].file_id, caption=message.caption or '')
+            await context.bot.send_photo(chat_id=chat_id, photo=message.photo[-1].file_id, caption=message.caption or '')
         elif message.video:
-            context.bot.send_video(chat_id=chat_id, video=message.video.file_id, caption=message.caption or '')
+            await context.bot.send_video(chat_id=chat_id, video=message.video.file_id, caption=message.caption or '')
         elif message.document:
-            context.bot.send_document(chat_id=chat_id, document=message.document.file_id, caption=message.caption or '')
+            await context.bot.send_document(chat_id=chat_id, document=message.document.file_id, caption=message.caption or '')
         elif message.audio:
-            context.bot.send_audio(chat_id=chat_id, audio=message.audio.file_id, caption=message.caption or '')
+            await context.bot.send_audio(chat_id=chat_id, audio=message.audio.file_id, caption=message.caption or '')
         elif message.voice:
-            context.bot.send_voice(chat_id=chat_id, voice=message.voice.file_id, caption=message.caption or '')
+            await context.bot.send_voice(chat_id=chat_id, voice=message.voice.file_id, caption=message.caption or '')
         elif message.sticker:
-            context.bot.send_sticker(chat_id=chat_id, sticker=message.sticker.file_id)
+            await context.bot.send_sticker(chat_id=chat_id, sticker=message.sticker.file_id)
         else:
-            update.message.reply_text("نوع الوسائط غير مدعوم.")
+            await update.message.reply_text("نوع الوسائط غير مدعوم.")
             return
-        update.message.reply_text("تم إرسال الرسالة/الوسائط إلى المجموعة.")
+        await update.message.reply_text("تم إرسال الرسالة/الوسائط إلى المجموعة.")
     except Exception as e:
         logger.error(f"Error sending message to group: {e}")
-        update.message.reply_text(f"حدث خطأ أثناء إرسال الرسالة إلى المجموعة: {e}")
+        await update.message.reply_text(f"حدث خطأ أثناء إرسال الرسالة إلى المجموعة: {e}")
 
 # رسائل المستخدمين العاديين
-def handle_user_message(update: Update, context: CallbackContext):
+async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     message = update.message
 
     if user.id == OWNER_ID or user.id in blocked_users:
         return
 
-    # إعداد اسم المستخدم مع رابط تليجرام
     user_name = user.first_name or user.username or f"User{user.id}"
     user_link = f"[{user_name}](tg://user?id={user.id})"
     caption = message.caption or ''
     user_info = f"رسالة من {user_link}:\n{message.text or caption}"
 
-    # إعداد الأزرار
     keyboard = [
         [
             InlineKeyboardButton("الرد", callback_data=f"reply_{user.id}"),
@@ -141,157 +121,149 @@ def handle_user_message(update: Update, context: CallbackContext):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # إرسال للمشرف
     try:
         if message.text:
-            context.bot.send_message(chat_id=OWNER_ID, text=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+            await context.bot.send_message(chat_id=OWNER_ID, text=user_info, reply_markup=reply_markup, parse_mode='Markdown')
         elif message.photo:
-            context.bot.send_photo(chat_id=OWNER_ID, photo=message.photo[-1].file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+            await context.bot.send_photo(chat_id=OWNER_ID, photo=message.photo[-1].file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
         elif message.video:
-            context.bot.send_video(chat_id=OWNER_ID, video=message.video.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+            await context.bot.send_video(chat_id=OWNER_ID, video=message.video.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
         elif message.document:
-            context.bot.send_document(chat_id=OWNER_ID, document=message.document.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+            await context.bot.send_document(chat_id=OWNER_ID, document=message.document.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
         elif message.audio:
-            context.bot.send_audio(chat_id=OWNER_ID, audio=message.audio.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+            await context.bot.send_audio(chat_id=OWNER_ID, audio=message.audio.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
         elif message.voice:
-            context.bot.send_voice(chat_id=OWNER_ID, voice=message.voice.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+            await context.bot.send_voice(chat_id=OWNER_ID, voice=message.voice.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
         elif message.sticker:
-            context.bot.send_sticker(chat_id=OWNER_ID, sticker=message.sticker.file_id)
-            context.bot.send_message(chat_id=OWNER_ID, text=user_info, reply_markup=reply_markup, parse_mode='Markdown')
+            await context.bot.send_sticker(chat_id=OWNER_ID, sticker=message.sticker.file_id)
+            await context.bot.send_message(chat_id=OWNER_ID, text=user_info, reply_markup=reply_markup, parse_mode='Markdown')
         else:
-            update.message.reply_text("نوع الوسائط غير مدعوم.")
+            await update.message.reply_text("نوع الوسائط غير مدعوم.")
             return
 
-        # تأكيد للمستخدم
-        update.message.reply_text("✅ تم إرسال رسالتك/الوسائط إلى المشرف. شكرًا لتواصلك.")
+        await update.message.reply_text("✅ تم إرسال رسالتك/الوسائط إلى المشرف. شكرًا لتواصلك.")
     except Exception as e:
         logger.error(f"Error sending message to admin: {e}")
-        update.message.reply_text("حدث خطأ أثناء إرسال الرسالة إلى المشرف.")
+        await update.message.reply_text("حدث خطأ أثناء إرسال الرسالة إلى المشرف.")
 
 # معالجة الأزرار
-def button_callback(update: Update, context: CallbackContext):
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = update.effective_user.id
 
     if user_id != OWNER_ID:
-        query.answer("غير مصرح لك باستخدام هذه الأزرار.")
+        await query.answer("غير مصرح لك باستخدام هذه الأزرار.")
         return
 
     data = query.data
     if data.startswith("reply_"):
         target_user_id = int(data.split("_")[1])
         context.user_data['reply_to'] = target_user_id
-        query.message.reply_text("أرسل الرد الآن:")
-        query.answer()
+        await query.message.reply_text("أرسل الرد الآن:")
+        await query.answer()
         return REPLY
     elif data.startswith("block_"):
         target_user_id = int(data.split("_")[1])
         blocked_users.add(target_user_id)
         save_blocked_users(blocked_users)
-        query.message.reply_text("تم حظر المستخدم.")
-        query.answer()
+        await query.message.reply_text("تم حظر المستخدم.")
+        await query.answer()
 
 # معالجة الرد
-def handle_reply(update: Update, context: CallbackContext):
+async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return ConversationHandler.END
 
     target_user_id = context.user_data.get('reply_to')
     if not target_user_id:
-        update.message.reply_text("حدث خطأ، لم يتم تحديد المستخدم.")
+        await update.message.reply_text("حدث خطأ، لم يتم تحديد المستخدم.")
         return ConversationHandler.END
 
     message = update.message.text
     try:
-        context.bot.send_message(chat_id=target_user_id, text=message)
-        update.message.reply_text("تم إرسال الرد إلى المستخدم.")
+        await context.bot.send_message(chat_id=target_user_id, text=message)
+        await update.message.reply_text("تم إرسال الرد إلى المستخدم.")
         logger.info(f"Reply sent to user {target_user_id}: {message}")
     except Exception as e:
         logger.error(f"Error sending reply to user {target_user_id}: {e}")
-        update.message.reply_text(f"حدث خطأ أثناء إرسال الرد: {e}")
+        await update.message.reply_text(f"حدث خطأ أثناء إرسال الرد: {e}")
 
-    # تنظيف البيانات
     context.user_data.pop('reply_to', None)
     return ConversationHandler.END
 
 # إلغاء الرد
-def cancel_reply(update: Update, context: CallbackContext):
-    update.message.reply_text("تم إلغاء الرد.")
+async def cancel_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("تم إلغاء الرد.")
     context.user_data.pop('reply_to', None)
     return ConversationHandler.END
 
 # رد المشرف على مستخدم باستخدام الأمر
-def reply_command(update: Update, context: CallbackContext):
+async def reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
 
     args = context.args
     if len(args) < 2:
-        update.message.reply_text("الاستخدام: /reply <user_id> <message>")
+        await update.message.reply_text("الاستخدام: /reply <user_id> <message>")
         return
 
     try:
         user_id = int(args[0])
         message = ' '.join(args[1:])
-        context.bot.send_message(chat_id=user_id, text=message)
-        update.message.reply_text("تم إرسال الرد.")
+        await context.bot.send_message(chat_id=user_id, text=message)
+        await update.message.reply_text("تم إرسال الرد.")
         logger.info(f"Reply sent via command to user {user_id}: {message}")
     except Exception as e:
         logger.error(f"Error in reply_command: {e}")
-        update.message.reply_text(f"حدث خطأ: {e}")
+        await update.message.reply_text(f"حدث خطأ: {e}")
 
 # حظر مستخدم
-def block_command(update: Update, context: CallbackContext):
+async def block_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
 
     args = context.args
     if len(args) != 1:
-        update.message.reply_text("الاستخدام: /block <user_id>")
+        await update.message.reply_text("الاستخدام: /block <user_id>")
         return
 
     try:
         user_id = int(args[0])
         blocked_users.add(user_id)
         save_blocked_users(blocked_users)
-        update.message.reply_text("تم الحظر.")
+        await update.message.reply_text("تم الحظر.")
         logger.info(f"User {user_id} blocked.")
     except Exception as e:
         logger.error(f"Error in block_command: {e}")
-        update.message.reply_text(f"حدث خطأ: {e}")
+        await update.message.reply_text(f"حدث خطأ: {e}")
 
 # إلغاء الحظر
-def unblock_command(update: Update, context: CallbackContext):
+async def unblock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
 
     args = context.args
     if len(args) != 1:
-        update.message.reply_text("الاستخدام: /unblock <user_id>")
+        await update.message.reply_text("الاستخدام: /unblock <user_id>")
         return
 
     try:
         user_id = int(args[0])
         blocked_users.discard(user_id)
         save_blocked_users(blocked_users)
-        update.message.reply_text("تم إلغاء الحظر.")
+        await update.message.reply_text("تم إلغاء الحظر.")
         logger.info(f"User {user_id} unblocked.")
     except Exception as e:
         logger.error(f"Error in unblock_command: {e}")
-        update.message.reply_text(f"حدث خطأ: {e}")
+        await update.message.reply_text(f"حدث خطأ: {e}")
 
-# تشغيل Flask
+# تشغيل Flask في خيط منفصل
 def run_flask():
-    app.run(host='0.0.0.0', port=PORT)
+    app.run(host='0.0.0.0', port=PORT, debug=False)
 
-# Global variable for updater and dispatcher
-updater = None
-dispatcher = None
-
-def main():
-    global updater, dispatcher
-    updater = Updater(TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
+async def main():
+    # إعداد تطبيق Telegram
+    application = Application.builder().token(TOKEN).build()
 
     # إعداد ConversationHandler للرد
     conv_handler = ConversationHandler(
@@ -303,52 +275,40 @@ def main():
     )
 
     # أوامر المشرف
-    dispatcher.add_handler(CommandHandler("start", start_command))
-    dispatcher.add_handler(CommandHandler("reply", reply_command))
-    dispatcher.add_handler(CommandHandler("block", block_command))
-    dispatcher.add_handler(CommandHandler("unblock", unblock_command))
-    dispatcher.add_handler(conv_handler)
-    dispatcher.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("reply", reply_command))
+    application.add_handler(CommandHandler("block", block_command))
+    application.add_handler(CommandHandler("unblock", unblock_command))
+    application.add_handler(conv_handler)
+    application.add_handler(CallbackQueryHandler(button_callback))
 
     # رسائل المشرف
-    dispatcher.add_handler(MessageHandler(
+    application.add_handler(MessageHandler(
         (Filters.text | Filters.photo | Filters.video | Filters.document | Filters.audio | Filters.voice | Filters.sticker)
         & Filters.private & Filters.user(user_id=OWNER_ID),
         handle_owner_message
     ))
 
     # رسائل المستخدمين
-    dispatcher.add_handler(MessageHandler(
+    application.add_handler(MessageHandler(
         (Filters.text | Filters.photo | Filters.video | Filters.document | Filters.audio | Filters.voice | Filters.sticker)
         & Filters.private,
         handle_user_message
     ))
 
-    # تشغيل Flask في الخلفية
+    # تشغيل Flask في خيط منفصل لفتح port
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
 
-    # بدء البوت
+    # بدء البوت باستخدام Polling
     try:
-        if WEBHOOK_MODE:
-            webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/webhook"
-            updater.bot.set_webhook(url=webhook_url)
-            logger.info(f"Webhook set to {webhook_url}")
-            updater.start_webhook(
-                listen="0.0.0.0",
-                port=PORT,
-                url_path="webhook",
-                webhook_url=webhook_url
-            )
-            logger.info("Bot started with webhook.")
-        else:
-            updater.start_polling()
-            logger.info("Bot started with polling.")
-        updater.idle()
+        logger.info("Bot started with polling.")
+        await application.run_polling()
     except Exception as e:
         logger.error(f"Error starting bot: {e}")
         raise
 
 if __name__ == '__main__':
-    main()
+    import asyncio
+    asyncio.run(main())
