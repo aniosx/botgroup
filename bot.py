@@ -48,9 +48,17 @@ def index():
 # Webhook endpoint
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), updater.bot)
-    dispatcher.process_update(update)
-    return 'OK'
+    try:
+        update = Update.de_json(request.get_json(force=True), updater.bot)
+        if update:
+            dispatcher.process_update(update)
+            return 'OK'
+        else:
+            logger.error("Received invalid update")
+            return 'Invalid update', 400
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return 'Error', 500
 
 # مسار المستخدمين المحظورين
 BLOCKED_USERS_FILE = 'blocked_users.txt'
@@ -201,7 +209,7 @@ def handle_reply(update: Update, context: CallbackContext):
     except Exception as e:
         logger.error(f"Error sending reply to user {target_user_id}: {e}")
         update.message.reply_text(f"حدث خطأ أثناء إرسال الرد: {e}")
-    
+
     # تنظيف البيانات
     context.user_data.pop('reply_to', None)
     return ConversationHandler.END
@@ -304,14 +312,14 @@ def main():
 
     # رسائل المشرف
     dispatcher.add_handler(MessageHandler(
-        (Filters.text | Filters.photo | Filters.video | Filters.document | Filters.audio | Filters.voice | Filters.sticker) 
+        (Filters.text | Filters.photo | Filters.video | Filters.document | Filters AUDIO | Filters.voice | Filters.sticker)
         & Filters.private & Filters.user(user_id=OWNER_ID),
         handle_owner_message
     ))
 
     # رسائل المستخدمين
     dispatcher.add_handler(MessageHandler(
-        (Filters.text | Filters.photo | Filters.video | Filters.document | Filters.audio | Filters.voice | Filters.sticker) 
+        (Filters.text | Filters.photo | Filters.video | Filters.document | Filters.audio | Filters.voice | Filters.sticker)
         & Filters.private,
         handle_user_message
     ))
