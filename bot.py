@@ -3,17 +3,28 @@
 
 import os
 import logging
+import threading
 from flask import Flask
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     MessageHandler,
-    Filters,
     CommandHandler,
     CallbackQueryHandler,
     ConversationHandler,
     ContextTypes,
+)
+from telegram.ext.filters import (
+    Text,
+    Photo,
+    Video,
+    Document,
+    Audio,
+    Voice,
+    Sticker,
+    User,
+    ChatType,
 )
 
 # إعداد السجلات
@@ -269,7 +280,7 @@ async def main():
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(button_callback, pattern='^reply_')],
         states={
-            REPLY: [MessageHandler(Filters.text & ~Filters.command, handle_reply)]
+            REPLY: [MessageHandler(Text(is_command=False), handle_reply)]
         },
         fallbacks=[CommandHandler('cancel', cancel_reply)]
     )
@@ -284,15 +295,15 @@ async def main():
 
     # رسائل المشرف
     application.add_handler(MessageHandler(
-        (Filters.text | Filters.photo | Filters.video | Filters.document | Filters.audio | Filters.voice | Filters.sticker)
-        & Filters.private & Filters.user(user_id=OWNER_ID),
+        (Text() | Photo() | Video() | Document() | Audio() | Voice() | Sticker())
+        & ChatType.PRIVATE & User(user_id=OWNER_ID),
         handle_owner_message
     ))
 
     # رسائل المستخدمين
     application.add_handler(MessageHandler(
-        (Filters.text | Filters.photo | Filters.video | Filters.document | Filters.audio | Filters.voice | Filters.sticker)
-        & Filters.private,
+        (Text() | Photo() | Video() | Document() | Audio() | Voice() | Sticker())
+        & ChatType.PRIVATE,
         handle_user_message
     ))
 
