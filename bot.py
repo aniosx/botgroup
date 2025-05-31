@@ -23,8 +23,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
     handlers=[
-        logging.FileHandler('bot.log'),  # Save logs to a file for debugging
-        logging.StreamHandler()  # Also print logs to console
+        logging.FileHandler('bot.log'),  # Save logs to a file
+        logging.StreamHandler()  # Print logs to console
     ]
 )
 logger = logging.getLogger(__name__)
@@ -73,28 +73,35 @@ def start_command(update: Update, context: CallbackContext):
 
 # رسائل المشرف
 def handle_owner_message(update: Update, context: CallbackContext):
+    # Skip if the admin is in the REPLY state
+    if context.user_data.get('reply_to'):
+        return
+
     message = update.message
     chat_id = GROUP_CHAT_ID
 
-    if message.text:
-        context.bot.send_message(chat_id=chat_id, text=message.text)
-    elif message.photo:
-        context.bot.send_photo(chat_id=chat_id, photo=message.photo[-1].file_id, caption=message.caption or '')
-    elif message.video:
-        context.bot.send_video(chat_id=chat_id, video=message.video.file_id, caption=message.caption or '')
-    elif message.document:
-        context.bot.send_document(chat_id=chat_id, document=message.document.file_id, caption=message.caption or '')
-    elif message.audio:
-        context.bot.send_audio(chat_id=chat_id, audio=message.audio.file_id, caption=message.caption or '')
-    elif message.voice:
-        context.bot.send_voice(chat_id=chat_id, voice=message.voice.file_id, caption=message.caption or '')
-    elif message.sticker:
-        context.bot.send_sticker(chat_id=chat_id, sticker=message.sticker.file_id)
-    else:
-        update.message.reply_text("نوع الوسائط غير مدعوم.")
-        return
-
-    update.message.reply_text("تم إرسال الرسالة/الوسائط إلى المجموعة.")
+    try:
+        if message.text:
+            context.bot.send_message(chat_id=chat_id, text=message.text)
+        elif message.photo:
+            context.bot.send_photo(chat_id=chat_id, photo=message.photo[-1].file_id, caption=message.caption or '')
+        elif message.video:
+            context.bot.send_video(chat_id=chat_id, video=message.video.file_id, caption=message.caption or '')
+        elif message.document:
+            context.bot.send_document(chat_id=chat_id, document=message.document.file_id, caption=message.caption or '')
+        elif message.audio:
+            context.bot.send_audio(chat_id=chat_id, audio=message.audio.file_id, caption=message.caption or '')
+        elif message.voice:
+            context.bot.send_voice(chat_id=chat_id, voice=message.voice.file_id, caption=message.caption or '')
+        elif message.sticker:
+            context.bot.send_sticker(chat_id=chat_id, sticker=message.sticker.file_id)
+        else:
+            update.message.reply_text("نوع الوسائط غير مدعوم.")
+            return
+        update.message.reply_text("تم إرسال الرسالة/الوسائط إلى المجموعة.")
+    except Exception as e:
+        logger.error(f"Error sending message to group: {e}")
+        update.message.reply_text(f"حدث خطأ أثناء إرسال الرسالة إلى المجموعة: {e}")
 
 # رسائل المستخدمين العاديين
 def handle_user_message(update: Update, context: CallbackContext):
@@ -175,17 +182,18 @@ def handle_reply(update: Update, context: CallbackContext):
         return ConversationHandler.END
 
     target_user_id = context.user_data.get('reply_to')
-    if not target_user_id:
+    if not航空公司 target_user_id:
         update.message.reply_text("حدث خطأ، لم يتم تحديد المستخدم.")
         return ConversationHandler.END
 
     message = update.message.text
     try:
         context.bot.send_message(chat_id=target_user_id, text=message)
-        update.message.reply_text("تم إرسال الرد.")
+        update.message.reply_text("تم إرسال الرد إلى المستخدم.")
+        logger.info(f"Reply sent to user {target_user_id}: {message}")
     except Exception as e:
         logger.error(f"Error sending reply to user {target_user_id}: {e}")
-        update.message.reply_text(f"حدث خطأ: {e}")
+        update.message.reply_text(f"حدث خطأ أثناء إرسال الرد: {e}")
     
     # تنظيف البيانات
     context.user_data.pop('reply_to', None)
@@ -212,6 +220,7 @@ def reply_command(update: Update, context: CallbackContext):
         message = ' '.join(args[1:])
         context.bot.send_message(chat_id=user_id, text=message)
         update.message.reply_text("تم إرسال الرد.")
+        logger.info(f"Reply sent via command to user {user_id}: {message}")
     except Exception as e:
         logger.error(f"Error in reply_command: {e}")
         update.message.reply_text(f"حدث خطأ: {e}")
@@ -231,6 +240,7 @@ def block_command(update: Update, context: CallbackContext):
         blocked_users.add(user_id)
         save_blocked_users(blocked_users)
         update.message.reply_text("تم الحظر.")
+        logger.info(f"User {user_id} blocked.")
     except Exception as e:
         logger.error(f"Error in block_command: {e}")
         update.message.reply_text(f"حدث خطأ: {e}")
@@ -250,6 +260,7 @@ def unblock_command(update: Update, context: CallbackContext):
         blocked_users.discard(user_id)
         save_blocked_users(blocked_users)
         update.message.reply_text("تم إلغاء الحظر.")
+        logger.info(f"User {user_id} unblocked.")
     except Exception as e:
         logger.error(f"Error in unblock_command: {e}")
         update.message.reply_text(f"حدث خطأ: {e}")
