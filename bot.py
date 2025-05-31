@@ -7,13 +7,15 @@ import threading
 
 from flask import Flask
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Updater,
     MessageHandler,
     Filters,
     CallbackContext,
-    CommandHandler
+    CommandHandler,
+    CallbackQueryHandler,
+    ConversationHandler
 )
 
 # إعداد السجلات
@@ -55,6 +57,9 @@ def save_blocked_users(users):
 
 blocked_users = load_blocked_users()
 
+# حالات المحادثة
+REPLY = 1
+
 # رسالة ترحيب عند /start
 def start_command(update: Update, context: CallbackContext):
     user = update.effective_user
@@ -95,25 +100,37 @@ def handle_user_message(update: Update, context: CallbackContext):
     if user.id == OWNER_ID or user.id in blocked_users:
         return
 
+    # إعداد اسم المستخدم مع رابط تليجرام
+    user_name = user.first_name or user.username or f"User{user.id}"
+    user_link = f"[{user_name}](tg://user?id={user.id})"
     caption = message.caption or ''
-    user_info = f"رسالة من المستخدم #{user.id}:\n{caption}"
+    user_info = f"رسالة من {user_link}:\n{message.text or caption}"
+
+    # إعداد الأزرار
+    keyboard = [
+        [
+            InlineKeyboardButton("الرد", callback_data=f"reply_{user.id}"),
+            InlineKeyboardButton("حظر", callback_data=f"block_{user.id}")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
     # إرسال للمشرف
     if message.text:
-        context.bot.send_message(chat_id=OWNER_ID, text=user_info + f"\n{message.text}")
+        context.bot.send_message(chat_id=OWNER_ID, text=user_info, reply_markup=reply_markup, parse_mode='Markdown')
     elif message.photo:
-        context.bot.send_photo(chat_id=OWNER_ID, photo=message.photo[-1].file_id, caption=user_info)
+        context.bot.send_photo(chat_id=OWNER_ID, photo=message.photo[-1].file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
     elif message.video:
-        context.bot.send_video(chat_id=OWNER_ID, video=message.video.file_id, caption=user_info)
+        context.bot.send_video(chat_id=OWNER_ID, video=message.video.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
     elif message.document:
-        context.bot.send_document(chat_id=OWNER_ID, document=message.document.file_id, caption=user_info)
+        context.bot.send_document(chat_id=OWNER_ID, document=message.document.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
     elif message.audio:
-        context.bot.send_audio(chat_id=OWNER_ID, audio=message.audio.file_id, caption=user_info)
+        context.bot.send_audio(chat_id=OWNER_ID, audio=message.audio.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
     elif message.voice:
-        context.bot.send_voice(chat_id=OWNER_ID, voice=message.voice.file_id, caption=user_info)
+        context.bot.send_voice(chat_id=OWNER_ID, voice=message.voice.file_id, caption=user_info, reply_markup=reply_markup, parse_mode='Markdown')
     elif message.sticker:
         context.bot.send_sticker(chat_id=OWNER_ID, sticker=message.sticker.file_id)
-        context.bot.send_message(chat_id=OWNER_ID, text=user_info)
+        context.bot.send_message(chat_id=OWNER_ID, text=user_info, reply_markup=reply_markup, parse_mode='Markdown')
     else:
         update.message.reply_text("نوع الوسائط غير مدعوم.")
         return
@@ -121,7 +138,57 @@ def handle_user_message(update: Update, context: CallbackContext):
     # تأكيد للمستخدم
     update.message.reply_text("✅ تم إرسال رسالتك/الوسائط إلى المشرف. شكرًا لتواصلك.")
 
-# رد المشرف على مستخدم
+# معالجة الأزرار
+def button_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    user_id = update.effective_user.id
+
+    if user_id != OWNER_ID:
+        query.answer("غير مصرح لك باستخدام هذه الأزرار.")
+        return
+
+    data = query.data
+    if data.startswith("reply_"):
+        target_user_id = int(data.split("_")[1])
+        context.user_data['reply_to'] = target_user_id
+        query.message.reply_text("أرسل الرد الآن:")
+        query.answer()
+        return REPLY
+    elif data.startswith("block_"):
+        target_user_id = int(data.split("_")[1])
+        blocked_users.add(target_user_id)
+        save_blocked_users(blocked_users)
+        query.message.reply_text("تم حظر المستخدم.")
+        query.answer()
+
+# معالجة الرد
+def handle_reply(update: Update, context: CallbackContext):
+    if update.effective_user.id != OWNER_ID:
+        return ConversationHandler.END
+
+    target_user_id = context.user_data.get('reply_to')
+    if not target_user_id:
+        update.message.reply_text("حدث خطأ، لم يتم تحديد المستخدم.")
+        return ConversationHandler.END
+
+    message = update.message.text
+    try:
+        context.bot.send_message(chat_id=target_user_id, text=message)
+        update.message.reply_text("تم إرسال الرد.")
+    except Exception as e:
+        update.message.reply_text(f"حدث خطأ: {e}")
+    
+    # تنظيف البيانات
+    context.user_data.pop('reply_to', None)
+    return ConversationHandler.END
+
+# إلغاء الرد
+def cancel_reply(update: Update, context: CallbackContext):
+    update.message.reply_text("تم إلغاء الرد.")
+    context.user_data.pop('reply_to', None)
+    return ConversationHandler.END
+
+# رد المشرف على مستخدم باستخدام الأمر
 def reply_command(update: Update, context: CallbackContext):
     if update.effective_user.id != OWNER_ID:
         return
@@ -183,11 +250,22 @@ def main():
     updater = Updater(TOKEN)
     dispatcher = updater.dispatcher
 
+    # إعداد ConversationHandler للرد
+    conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(button_callback, pattern='^reply_')],
+        states={
+            REPLY: [MessageHandler(Filters.text & ~Filters.command, handle_reply)]
+        },
+        fallbacks=[CommandHandler('cancel', cancel_reply)]
+    )
+
     # أوامر المشرف
     dispatcher.add_handler(CommandHandler("start", start_command))
     dispatcher.add_handler(CommandHandler("reply", reply_command))
     dispatcher.add_handler(CommandHandler("block", block_command))
     dispatcher.add_handler(CommandHandler("unblock", unblock_command))
+    dispatcher.add_handler(conv_handler)
+    dispatcher.add_handler(CallbackQueryHandler(button_callback))
 
     # رسائل المشرف
     dispatcher.add_handler(MessageHandler(
