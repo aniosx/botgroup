@@ -68,7 +68,7 @@ def start_command(update: Update, context: CallbackContext):
     user = update.effective_user
     if user.id == OWNER_ID:
         return
-    update.message.reply_text("مرحبًا بك! أرسل رسالتك أو أي نوع من الوسائط، وسأقوم بإرسالها إلى المشرف.")
+    update.message.reply_text("مرحبًا بك! كيف يمكنني مساعدتك؟")
 
 # رسائل المشرف
 def handle_owner_message(update: Update, context: CallbackContext):
